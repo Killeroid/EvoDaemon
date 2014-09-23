@@ -74,16 +74,7 @@ public class HitCounter implements ClassFileTransformer{
 				noCounter.add(methodFullName);
 			}
 			
-			AgentData.visitStats.putIfAbsent(methodFullName, new HashMap<String, AtomicLong>() {/**
-				 * 
-				 */
-				private static final long serialVersionUID = 1L;
-
-			{ 
-				put("visitCount", new AtomicLong(0));
-				put("lastVisit", new AtomicLong(System.currentTimeMillis()));
-				put("visitFreq", new AtomicLong(0));
-			}});
+			AgentData.initRecord(methodFullName);
 		}
 		
 		reader = new ClassReader(classfileBuffer);
@@ -156,7 +147,7 @@ public class HitCounter implements ClassFileTransformer{
 			String normalizedOwner = methodOwner.replaceAll(Pattern.quote("."), "/");
 			String normalizedDesc = (desc == null) ? "" : desc;
 			String methodFullName = normalizedOwner + "." + methodName + " >> " + normalizedDesc;
-			AgentData.visitCounts.remove(methodFullName);
+			AgentData.visitStats.remove(methodFullName);
 		}
 		
 		// Get the caller of the counter method
@@ -186,8 +177,8 @@ public class HitCounter implements ClassFileTransformer{
 			}
 		}
 		
-		public static ConcurrentHashMap<String, AtomicLong> getVisits() {
-			return AgentData.visitCounts;
+		public static ConcurrentHashMap<String, HashMap<String, AtomicLong>> getVisits() {
+			return AgentData.visitStats;
 		}
 	
 	static class EnteringAdapter extends AdviceAdapter {

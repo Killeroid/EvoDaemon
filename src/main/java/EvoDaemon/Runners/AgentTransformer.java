@@ -9,26 +9,29 @@ import EvoDaemon.EvoDaemon;
 
 public class AgentTransformer implements Callable<Boolean> {
 	volatile Instrumentation instrumentor;
+	public static String name = "AgentTransformer";
 	
 	public AgentTransformer(Instrumentation instr) {
 		this.instrumentor = instr;
 	}
 
 	public Boolean call() {
-		System.out.println("[SUCCESS] AgentTransformer Running");
+		System.out.println("[INFO] AgentTransformer running");
 		//this.instrumentor.retransformClasses();
 		EvoDaemon.retransformClasses();
+		System.out.println("[INFO] AgentTransformer completed");
 		return true;
 		
 	}
 	
 	public static void schedule() {
-		System.out.println("[NOTICE] Scheduling an agent transformer");
+		//System.out.println("[INFO] Scheduling an agent transformer");
 		HashMap<String, Object> hitter = new HashMap<String, Object>();
 		//hitter.put("actionType", actionType.EvoAction);
 		hitter.put("actionType", 2);
-		System.out.println("[NOTICE] Adding an agent transformer to the queue");
+		hitter.put("actionClass", AgentTransformer.class);
+		//System.out.println("[NOTICE] Adding an agent transformer to the queue");
 		EvoDaemon.evoqueue.add(hitter);
-		EvoDaemon.queue.add(AgentTransformer.class);
+		System.out.println("[INFO] Scheduled an agent transformer");
 	}
 }

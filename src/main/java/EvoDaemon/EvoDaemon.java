@@ -4,6 +4,7 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.lang.instrument.Instrumentation;
+import java.lang.reflect.InvocationTargetException;
 import java.util.HashMap;
 import java.util.Map.Entry;
 import java.util.concurrent.Callable;
@@ -21,6 +22,7 @@ import org.apache.commons.io.IOUtils;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassWriter;
 
+import EvoDaemon.Strategies.Deterministic;
 import EvoDaemon.Transformers.*;
 import EvoDaemon.Utils.*;
 import EvoDaemon.Runners.*;
@@ -32,42 +34,39 @@ import EvoDaemon.Runners.*;
 public class EvoDaemon implements Runnable {
 
 	private boolean Debug;
-	public static ConcurrentLinkedQueue<Class<? extends Callable<?>>> queue;
 	public static ConcurrentLinkedQueue<HashMap<String, Object>> evoqueue;
 	private static ExecutorService executor = Executors.newSingleThreadExecutor();
 	private Future<?> runningTask;
-	private long currEpoch;
+	public static long currEpoch;
+	public static long epochLengthSecs = 7L;
 	private boolean shutDownNow = false;
 	public static volatile Instrumentation INSTRUMENTATION;
 
 	public EvoDaemon() {
-		System.out.println("Initializing daemon thread");
-		this.currEpoch = System.nanoTime();
+		System.out.println("[INFO] Initializing daemon thread...");
+		currEpoch = 0L;
 	}
 
 	public EvoDaemon(Instrumentation instr, String jar) {
 		File jarFile = new File(jar);
 		jarFile.deleteOnExit();
-		this.currEpoch = System.nanoTime();
+		currEpoch = 0L;
 		INSTRUMENTATION = instr;
-		/*for (Class<?> c : instr.getAllLoadedClasses()) {
-			System.out.printf("%-55s %-55s %-45s\n", c.getName(), c.getCanonicalName(), c.getClassLoader());
-		}*/
-
-		//ClassRedefinition redefs = new ClassRedefinition(new HitCounter());
-		//INSTRUMENTATION.addTransformer(redefs, true);
 		evoqueue = new ConcurrentLinkedQueue<HashMap<String, Object>>();
-		queue = new ConcurrentLinkedQueue<Class<? extends Callable<?>>>();
+		//queue = new ConcurrentLinkedQueue<Class<? extends Callable<?>>>();
 		runningTask = null;
 	}
 	
+	public static void runAtEpoch() {
+		
+	}
+	
 	public static void startDaemon(Instrumentation instr, String jar) {
-		System.out.println("[SUCCESS] Starting daemon thread");
+		System.out.println("[INFO] Starting daemon thread");
 		try {
 			Thread daemon = new Thread(new EvoDaemon(instr, jar));
 			daemon.setName("EvoDaemon");
-			//daemon.setUncaughtExceptionHandler(new DefaultExceptionHandler());
-			System.out.println("Daemon thread classloader: " + daemon.getContextClassLoader());
+			daemon.setUncaughtExceptionHandler(new DefaultExceptionHandler());
 			daemon.start();
 
 		} catch (IllegalArgumentException e) {
@@ -86,23 +85,23 @@ public class EvoDaemon implements Runnable {
 		}
 	}
 
+	@SuppressWarnings("unchecked")
 	public void run() {
-		System.out.println("[SUCCESS] Starting daemon thread");
-		//Thread.currentThread().setUncaughtExceptionHandler(new DefaultExceptionHandler());
+		System.out.println("[INFO] Starting daemon thread");
+		currEpoch = 0L;
+		long startofEpoch = System.currentTimeMillis();
+		Thread.currentThread().setUncaughtExceptionHandler(new DefaultExceptionHandler());
 		
 		
-		ClassRedefinition redefs = new ClassRedefinition(new HitCounter());
-		INSTRUMENTATION.addTransformer(redefs, true);
-		System.out.println("[SUCCESS-1] Add ClassRedefinition files");
-		
-		//retransformClasses();
-		
-		System.out.println("[SUCCESS-2] Transformed files");
-		//runningTask = executor.submit(new AgentTransformer(INSTRUMENTATION));
+		//ClassRedefinition redefs = new ClassRedefinition(new HitCounter());
+		//INSTRUMENTATION.addTransformer(redefs, true);
+		OnLoad firstpass = new OnLoad(new HitCounter());
+		INSTRUMENTATION.addTransformer(firstpass, true);
 		
 		AgentTransformer.schedule();
-		//evoqueue.add(new HashMap<String, Object>() {{ put("actionType", 2); }});
-		System.out.println("[SUCCESS] Scheduled a transformer");
+		//Deterministic.scheduleFirstInvocation();
+
+		//System.out.println("[SUCCESS] Scheduled a transformer");
 		HitCounterRunner hitter = new HitCounterRunner();
 		for (;;) {
 
@@ -111,16 +110,26 @@ public class EvoDaemon implements Runnable {
 				break;
 			}
 			
+			/*
+			 * Increase epoch
+			 */
+			if (System.currentTimeMillis() >= (startofEpoch + (1000 * epochLengthSecs))) {
+				currEpoch += 1L;
+				startofEpoch = System.currentTimeMillis();
+				if (currEpoch > 1) {
+					Deterministic.schedule();
+				}
+			}
+			
 			if (runningTask != null && !runningTask.isDone()) {
 				//System.out.println("[NOTICE] A task is running");
 				//System.out.print(".");
 				continue;
 			} else {
 				runningTask = null;
+				//Deterministic.scheduleNextInvocation(60L);
+				
 			}
-			
-			System.out.print("\n");
-			
 
 			try {
 				
@@ -141,12 +150,22 @@ public class EvoDaemon implements Runnable {
 							break;
 						case 2: //EvoAction : 
 							//runningTask = executor.submit(queue.poll().newInstance()); 
-							runningTask = executor.submit(new AgentTransformer(INSTRUMENTATION)); 
+							//runningTask = executor.submit(new AgentTransformer(INSTRUMENTATION));
+							runningTask = executor.submit(((Class<? extends Callable<?>>) action.get("actionClass")).getDeclaredConstructor(Instrumentation.class).newInstance(INSTRUMENTATION));
 							break;
+						}
+					}
+					
+					if (System.currentTimeMillis() >= (startofEpoch + (1000 * epochLengthSecs))) {
+						currEpoch += 1L;
+						startofEpoch = System.currentTimeMillis();
+						if (currEpoch > 1) {
+							Deterministic.schedule();
 						}
 					}
 
 				} while ((runningTask == null || runningTask.isDone() || runningTask.isCancelled()));
+				
 
 
 
@@ -155,6 +174,29 @@ public class EvoDaemon implements Runnable {
 				e.printStackTrace();
 				System.out.println("[ERROR] Task was rejected");
 				//shutdownAndAwaitTermination(executor);	
+			} catch (InstantiationException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			} catch (IllegalAccessException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+				System.out.println("[ERROR] Could not instantiate task");
+			} catch (IllegalArgumentException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+				System.out.println("[ERROR] Could not instantiate task");
+			} catch (InvocationTargetException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+				System.out.println("[ERROR] Could not instantiate task");
+			} catch (NoSuchMethodException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+				System.out.println("[ERROR] Could not instantiate task");
+			} catch (SecurityException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+				System.out.println("[ERROR] Could not instantiate task");
 			}
 		}
 		hitter = null;
@@ -169,6 +211,7 @@ public class EvoDaemon implements Runnable {
 	 */
 	// 
 	public void shutdownAndAwaitTermination(ExecutorService pool) {
+		System.out.println("[INFO] Shutting down helper threads");
 		this.shutDownNow = true;
 		pool.shutdown(); // Disable new tasks from being submitted
 		try {
@@ -177,7 +220,7 @@ public class EvoDaemon implements Runnable {
 				pool.shutdownNow(); // Cancel currently executing tasks
 				// Wait a while for tasks to respond to being cancelled
 				if (!pool.awaitTermination(60, TimeUnit.SECONDS))
-					System.err.println("Pool did not terminate");
+					System.err.println("[ERROR] Pool did not terminate");
 			}
 		} catch (InterruptedException ie) {
 			// (Re-)Cancel if current thread also interrupted
@@ -238,13 +281,13 @@ public class EvoDaemon implements Runnable {
 	}
 	
 	public static void retransformClasses() {
-		System.out.println("\n----------------Inserting Visitor Counter----------------\n");
+		System.out.println("\n----------------TRANSFORMING CLASSES----------------\n");
 		//System.out.printf("%-55s %-55s %-45s\n", "NAME", "CANONICAL NAME", "CLASSLOADER");
 		for (Class<?> c : INSTRUMENTATION.getAllLoadedClasses()) {
 			if (canInstrument(c)) {
 				try {
 					//System.out.printf("%-55s %-55s %-45s\n", c.getName(), c.getCanonicalName(), c.getClassLoader());
-					System.out.println("[INSERT]" + c.getName());
+					//System.out.println("---> " + c.getName());
 					INSTRUMENTATION.retransformClasses(new Class<?>[] { c });
 				} catch (Exception e) {
 					e.printStackTrace();
@@ -252,7 +295,7 @@ public class EvoDaemon implements Runnable {
 				}
 			} 
 		}
-		System.out.println("[SUCCESS] Visit Counter inserted");
+		System.out.println("[INFO] Visit Counter inserted");
 	}
 	
 	/*
@@ -289,11 +332,7 @@ public class EvoDaemon implements Runnable {
 		String methodFullName = normalizedOwner + "." + methodName + " >> " + normalizedDesc;
 		//String methodCaller = getMethodCaller();
 
-		AgentData.visitStats.putIfAbsent(methodFullName, new HashMap<String, AtomicLong>() {{ 
-			put("visitCount", new AtomicLong(0));
-			put("lastVisit", new AtomicLong(System.currentTimeMillis()));
-			put("visitFreq", new AtomicLong(0));
-		}});
+		AgentData.initRecord(methodFullName);
 
 
 		//Count visits
@@ -376,11 +415,8 @@ public class EvoDaemon implements Runnable {
 				String methodFullName = normalizedOwner + "." + methodName + " >> " + normalizedDesc;
 
 				//Set default values
-				AgentData.visitStats.putIfAbsent(methodFullName, new HashMap<String, AtomicLong>() {{ 
-					put("visitCount", new AtomicLong(0));
-					put("lastVisit", new AtomicLong(System.currentTimeMillis()));
-					put("visitFreq", new AtomicLong(0));
-				}});
+				AgentData.initRecord(methodFullName);
+
 
 				//Count visits
 				long count = AgentData.visitStats.get(methodFullName).get("visitCount").incrementAndGet();
@@ -393,6 +429,19 @@ public class EvoDaemon implements Runnable {
 					//long newVisitFreq = ((hitTime - lastVisit) + ((count - 2) * lastVisitFreq)) / (count - 1) ;
 					AgentData.visitStats.get(methodFullName).get("visitFreq").set(((this.hitTime - lastVisit) + ((count - 2) * lastVisitFreq)) / (count - 1));
 				}
+				
+				
+				/*
+				 * Update max's
+				 */
+				if (AgentData.countMaxs.get("maxVisit").longValue() < count) 
+					AgentData.countMaxs.get("maxVisit").getAndSet(count);
+				
+				long visitFreq = AgentData.visitStats.get(methodFullName).get("visitFreq").longValue();
+				
+				if (AgentData.countMaxs.get("maxFreq").longValue() < visitFreq) 
+					AgentData.countMaxs.get("maxVisit").getAndSet(visitFreq);
+
 				//System.out.print(" Method: " + normalizedOwner + "." + methodName + "() | Visit: " + count);
 				reset();
 				
@@ -402,24 +451,6 @@ public class EvoDaemon implements Runnable {
 	}
 
 
-	static class Remover implements Runnable {
-		private String className;
-		private String methodName;
-		private String methodDesc;
-
-		Remover(String className, String methodName, String methodDesc) {
-			this.className = className;
-			this.methodName = methodName;
-			this.methodDesc = methodDesc;
-		}
-		public void run() {
-			String normalizedOwner = this.className.replaceAll(Pattern.quote("."), "/");
-			String normalizedDesc = (this.methodDesc == null) ? "" : this.methodDesc;
-			String methodFullName = normalizedOwner + "." + methodName + " >> " + normalizedDesc;
-			AgentData.visitCounts.putIfAbsent(methodFullName, new AtomicLong(0));
-			AgentData.visitCounts.get(methodFullName).incrementAndGet();
-		}
-	}
 
 	static class CounterInserter implements Runnable {
 
@@ -456,7 +487,7 @@ public class EvoDaemon implements Runnable {
 		}
 
 		public void run() {
-			long startTime = System.currentTimeMillis();
+			long startTime = System.nanoTime();
 
 		}
 

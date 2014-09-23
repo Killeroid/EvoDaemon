@@ -1,6 +1,7 @@
 package EvoDaemon.Utils;
 
 import java.lang.instrument.ClassDefinition;
+import java.lang.instrument.Instrumentation;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Set;
@@ -8,6 +9,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Pattern;
 
+import EvoDaemon.EvoDaemon;
 import EvoDaemon.Transformers.HitCounter;
 
 
@@ -46,18 +48,25 @@ public class AgentData {
 			put("EvoDaemon.", 0);
 			put("EvoAgent.", 0);
 			put("java.util.concurrent", 0);
+			put("Test.SlimTest.", 0);
 			
 	}};
 	
-	public static ConcurrentHashMap<String, AtomicLong> visitCounts = new ConcurrentHashMap<String, AtomicLong>(); //store number of visits
+	//public static ConcurrentHashMap<String, AtomicLong> visitCounts = new ConcurrentHashMap<String, AtomicLong>(); //store number of visits
 	
 	public static ConcurrentHashMap<String, HashMap<String, AtomicLong>> visitStats = new ConcurrentHashMap<String, HashMap<String, AtomicLong>>();
 	
 	public static ConcurrentHashMap<String, AtomicLong> methodInvokeeCount = new ConcurrentHashMap<String, AtomicLong>(); //store number of times a method invokes something
 	
-	private static ConcurrentHashMap<String, HashSet<ClassDefinition>> toBeRedefined = new ConcurrentHashMap<String, HashSet<ClassDefinition>>();
+	private static ConcurrentHashMap<String, byte[]> toBeRedefined = new ConcurrentHashMap<String, byte[]>();
 	
 	private static ConcurrentHashMap<String, Class<?>> loadedClasses = new ConcurrentHashMap<String, Class<?>>();  //All loaded classes
+	
+	public static ConcurrentHashMap<String, AtomicLong> countMaxs = new ConcurrentHashMap<String, AtomicLong>() {{
+		put("maxVisit", new AtomicLong(0));
+		put("maxFreq", new AtomicLong(0));
+		put("maxFitness", new AtomicLong(0));
+	}};
 	
 	public static long CollectionFreq = 60000;
 	
@@ -82,19 +91,39 @@ public class AgentData {
 		return result;
 	}
 	
-	public static void addNewRedefinition(String name, ClassDefinition redef) {
-		if (toBeRedefined.containsKey(name)) {
-			toBeRedefined.get(name).add(redef);
-		} else {
-			HashSet<ClassDefinition> defs = new HashSet<ClassDefinition>();
-			defs.add(redef);
-			toBeRedefined.putIfAbsent(name, defs);
-		}
-
+	public static void addNewRedefinition(String name, byte[] redef) {
+		byte[] newclass = new byte[redef.length];
+		System.arraycopy(redef, 0, newclass, 0, redef.length);
+		
+		toBeRedefined.put(name, newclass);
 	}
 	
-	public static void doneRedefining() {
+	public static void redefineClass(Instrumentation instr) {
+		Set<String> removed = new HashSet<String>();
+		for (Class<?> c : instr.getAllLoadedClasses()) {
+			if (EvoDaemon.canInstrument(c)) {
+				try {
+					if (toBeRedefined.contains(c.getName())) {
+						//ClassDefinition def = ;
+						
+						instr.redefineClasses(new ClassDefinition[] { new ClassDefinition(c, toBeRedefined.get(c.getName())) });
+						removed.add(c.getName());
+					} else if (toBeRedefined.contains(c.getName().replaceAll("/", "."))) {
+						instr.redefineClasses(new ClassDefinition[] { new ClassDefinition(c, toBeRedefined.get(c.getName().replaceAll("/", "."))) });
+						removed.add(c.getName().replaceAll("/", "."));
+					}
+					System.out.println("_____________ Redefined: " + c.getName());
+					//instr.retransformClasses(new Class<?>[] { c });
+				} catch (Exception e) {
+					e.printStackTrace();
+					//System.exit(1);
+				}
+			}
+		}
 		
+		for (String s: removed) {
+			toBeRedefined.remove(s);
+		}
 	}
 	
 	
@@ -125,10 +154,7 @@ public class AgentData {
 		
 		if (AgentData.visitStats.containsKey(methodFullName)) {
 			//Count visits
-			//AgentData.visitCounts.putIfAbsent(methodFullName, new AtomicLong(0));
-			//AgentData.visitCounts.get(methodFullName).incrementAndGet();
-			//visitCounts.putIfAbsent(methodFullName, new AtomicLong(0));
-			//visitCounts.get(methodFullName).incrementAndGet();
+
 			
 			//long hitTime = System.nanoTime();
 			long count = AgentData.visitStats.get(methodFullName).get("visitCount").incrementAndGet();
@@ -153,15 +179,35 @@ public class AgentData {
 			System.out.print(" | ");
 			System.out.print("Invoked by " + methodCaller + "\n");
 		}
-
+	}
+	
+	public static void initRecord(String methodName, String desc, String methodOwner) {
+		String normalizedOwner = methodOwner.replaceAll(Pattern.quote("."), "/");
+		String normalizedDesc = (desc == null) ? "" : desc;
+		String methodFullName = normalizedOwner + "." + methodName + " >> " + normalizedDesc;
 		
-		
+		initRecord(methodFullName);
+	}
+	
+	public static void initRecord(String methodFullName) {
+		AgentData.visitStats.putIfAbsent(methodFullName, new HashMap<String, AtomicLong>() {{ 
+			put("visitCount", new AtomicLong(0));
+			put("lastVisit", new AtomicLong(System.nanoTime()));
+			put("visitFreq", new AtomicLong(0));
+		}});
 	}
 	
 	
 	public static double cummAvg() {
 		
 		return 0;
+	}
+	
+	public static HashMap<String, AtomicLong> getMethodDetails(String methodName, String desc, String methodOwner) {
+		String normalizedOwner = methodOwner.replaceAll(Pattern.quote("."), "/");
+		String normalizedDesc = (desc == null) ? "" : desc;
+		String methodFullName = normalizedOwner + "." + methodName + " >> " + normalizedDesc;
+		return AgentData.visitStats.get(methodFullName);
 	}
 	
 	
