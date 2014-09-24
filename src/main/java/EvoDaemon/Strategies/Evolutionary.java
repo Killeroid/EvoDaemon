@@ -160,9 +160,9 @@ public class Evolutionary implements Callable<Boolean>, ClassFileTransformer {
 	public Boolean call() {
 		try {
 			System.out.println("--> [EVOLUTION ] Fitness Based Evolutionary Strategy Running");
-			this.INSTRUMENTATION.addTransformer(this, true);
+			EvoDaemon.INSTRUMENTATION.addTransformer(this, true);
 			EvoDaemon.retransformClasses();
-			this.INSTRUMENTATION.removeTransformer(this);
+			EvoDaemon.INSTRUMENTATION.removeTransformer(this);
 			AgentData.redefineClass(this.INSTRUMENTATION);
 			return true;
 		} catch (Exception e) {

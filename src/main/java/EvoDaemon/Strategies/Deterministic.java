@@ -23,7 +23,7 @@ import EvoDaemon.Utils.AgentData;
 
 public class Deterministic implements Callable<Boolean>, ClassFileTransformer {
 	
-	private Instrumentation INSTRUMENTATION;
+	//private Instrumentation INSTRUMENTATION;
 	private static long nextInvocation;
 	private static long invocationIntervalSecs = 60;
 	public static String name = "Deterministic Evolutionary Strategy";
@@ -33,8 +33,8 @@ public class Deterministic implements Callable<Boolean>, ClassFileTransformer {
 	private Set<Class <? extends ClassFileTransformer>> transformers;
 	private static Set<String> removableMethods;
 	
-	public Deterministic(Instrumentation instr) {
-		this.INSTRUMENTATION = instr;
+	public Deterministic() {
+
 	}
 
 	public byte[] transform(ClassLoader loader, String className,
@@ -175,17 +175,27 @@ public class Deterministic implements Callable<Boolean>, ClassFileTransformer {
 	public Boolean call() {
 		try {
 			System.out.println("--> [EVOLUTION ] Deterministic Evolutionary Strategy Running");
-			//this.INSTRUMENTATION.addTransformer(this, true);
+			EvoDaemon.INSTRUMENTATION.addTransformer(this, true);
 			EvoDaemon.retransformClasses();
-			//this.INSTRUMENTATION.removeTransformer(this);
+			//EvoDaemon.INSTRUMENTATION.removeTransformer(this);
+			removeTransformer();
 			//AgentData.redefineClass(this.INSTRUMENTATION);
 			canRun = false;
 			return true;
 		} catch (Exception e) {
 			e.printStackTrace();
-			this.INSTRUMENTATION.removeTransformer(this);
+			EvoDaemon.INSTRUMENTATION.removeTransformer(this);
 			return false;
 		}
+		
+	}
+	
+	public void removeTransformer() {
+		boolean notDone = true;
+		do {
+			notDone = EvoDaemon.INSTRUMENTATION.removeTransformer(this);
+			System.out.println("--> [NOTICE    ] Removing Deterministic from instrumentation");
+		} while (notDone == false);
 		
 	}
 	

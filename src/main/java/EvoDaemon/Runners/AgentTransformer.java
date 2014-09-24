@@ -8,11 +8,9 @@ import EvoDaemon.EvoDaemon;
 
 
 public class AgentTransformer implements Callable<Boolean> {
-	volatile Instrumentation instrumentor;
 	public static String name = "AgentTransformer";
 	
-	public AgentTransformer(Instrumentation instr) {
-		this.instrumentor = instr;
+	public AgentTransformer() {
 	}
 
 	public Boolean call() {
