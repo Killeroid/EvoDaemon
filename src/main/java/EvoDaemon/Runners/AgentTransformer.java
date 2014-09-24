@@ -16,10 +16,10 @@ public class AgentTransformer implements Callable<Boolean> {
 	}
 
 	public Boolean call() {
-		System.out.println("[INFO] AgentTransformer running");
+		System.out.println("--> [INFO      ] AgentTransformer running");
 		//this.instrumentor.retransformClasses();
 		EvoDaemon.retransformClasses();
-		System.out.println("[INFO] AgentTransformer completed");
+		System.out.println("--> [INFO      ] AgentTransformer completed");
 		return true;
 		
 	}
@@ -32,6 +32,6 @@ public class AgentTransformer implements Callable<Boolean> {
 		hitter.put("actionClass", AgentTransformer.class);
 		//System.out.println("[NOTICE] Adding an agent transformer to the queue");
 		EvoDaemon.evoqueue.add(hitter);
-		System.out.println("[INFO] Scheduled an agent transformer");
+		System.out.println("--> [INFO      ] Scheduled an agent transformer");
 	}
 }

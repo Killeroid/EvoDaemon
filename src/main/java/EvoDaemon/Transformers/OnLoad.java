@@ -106,7 +106,7 @@ public class OnLoad implements ClassFileTransformer {
 			//System.out.println("[WARNING]: " + className.replaceAll("/", ".") + " already redefined. Skipping...");
 			return false;
 		} else {
-			System.out.println("--[OnLoad]--> " + className);
+			System.out.println("--> [INFO      ] Probed " + className);
 			return true;
 		}
 	}

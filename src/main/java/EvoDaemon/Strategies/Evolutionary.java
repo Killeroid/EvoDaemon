@@ -21,19 +21,18 @@ import EvoDaemon.EvoDaemon;
 import EvoDaemon.Utils.AgentData;
 
 
-public class Deterministic implements Callable<Boolean>, ClassFileTransformer {
+public class Evolutionary implements Callable<Boolean>, ClassFileTransformer {
 	
 	private Instrumentation INSTRUMENTATION;
 	private static long nextInvocation;
 	private static long invocationIntervalSecs = 60;
-	public static String name = "Deterministic Evolutionary Strategy";
-	private static boolean canRun = false;
+	public static String name = "Fitness Based Evolutionary Strategy";
 	
 	
 	private Set<Class <? extends ClassFileTransformer>> transformers;
 	private static Set<String> removableMethods;
 	
-	public Deterministic(Instrumentation instr) {
+	public Evolutionary(Instrumentation instr) {
 		this.INSTRUMENTATION = instr;
 	}
 
@@ -41,17 +40,18 @@ public class Deterministic implements Callable<Boolean>, ClassFileTransformer {
 			Class<?> classBeingRedefined, ProtectionDomain protectionDomain,
 			byte[] classfileBuffer) throws IllegalClassFormatException {
 		
-		if (!canRun) {
-			return null;
-		}
-		
 		final String normalizedClassName = className.replaceAll("/", ".");
 		final String loaderName = "[" + loader.toString() + "]"; 
-
+		
+		
+		if (classBeingRedefined == null || classfileBuffer == null) {
+			return classfileBuffer;
+		}
 		
 		ClassReader reader = null;
 		try {
 			//reader = new ClassReader(normalizedClassName);
+			//reader = new ClassReader(className);
 			reader = new ClassReader(classfileBuffer);
 		} catch (Exception e1) {//(IOException e1) {
 			e1.printStackTrace();
@@ -62,10 +62,8 @@ public class Deterministic implements Callable<Boolean>, ClassFileTransformer {
 		ClassVisitor visitor = new ClassVisitor(Opcodes.ASM5, writer) {
 		    @Override
 		    public MethodVisitor visitMethod(int access, final String name, String desc, String signature, String[] exceptions) {
-		    	//final String methodDesc = (desc == null) ? "" : desc;
 		    	/*Not enough visits*/
-		    	//canBeRemovedProbability(normalizedClassName, name, desc);
-		    	if (canBeRemoved(normalizedClassName, name, desc)) {
+		    	if (canBeRemovedProbability(normalizedClassName, name, desc)) {
 		    		System.out.println("--> [REMOVE    ] Removing call to CLASS: " + loaderName + normalizedClassName + "." + name + "()");
 		    		return null;
 		    	} else {
@@ -105,32 +103,24 @@ public class Deterministic implements Callable<Boolean>, ClassFileTransformer {
 	}
 	
 	public static boolean canBeRemoved(String className, String methodName, String desc) {
-		//System.out.print("[CHECK] Checking method: " + methodName);
-		if (methodName.startsWith("<init>") || methodName.startsWith("<clinit>") || methodName.startsWith("A1")) {
-			//System.out.print(" false\n");
-			return false;
-		}
-		if (AgentData.getMethodDetails(methodName, desc, className).get("visitCount").longValue() > 5) {
-			//System.out.print(" false\n");
-			return false;
-		} else {
-			//System.out.print(" true\n");
-			return true;
-		}		
-	}
-	
-	
-	
-	public static boolean canBeRemovedProbability1(String className, String methodName, String desc) {
 		if (methodName.startsWith("<init>") || methodName.startsWith("<clinit>"))
 			return false;
+		return canBeRemovedProbability(className, methodName, desc);		
+	}
+	
+	public static boolean canBeRemovedProbability(String className, String methodName, String desc) {
+		if (methodName.startsWith("<init>") || methodName.startsWith("<clinit>")) {
+			return false;
+			}
 		
+		long prob = (100 * AgentData.getMethodDetails(methodName, desc, className).get("visitCount").longValue()) / 
+				AgentData.countMaxs.get("maxVisit").longValue();
 		
 		Random random = new Random();
 		long rnd = random.nextInt(100);
 		
-		//System.out.println("[NOTICE] prob: " + prob + " rnd: " + rnd);
-		if ((rnd % 2) == 1) {
+
+		if (rnd >= prob) {
 			return true;
 		} else {
 			return false;
@@ -140,15 +130,10 @@ public class Deterministic implements Callable<Boolean>, ClassFileTransformer {
 	
 	public static void schedule() {
 		HashMap<String, Object> hitter = new HashMap<String, Object>();
-		//hitter.put("actionType", actionType.EvoAction);
 		hitter.put("actionType", 2);
-		hitter.put("actionClass", Deterministic.class);
-		//System.out.println("[NOTICE] Adding an agent transformer to the queue");
+		hitter.put("actionClass", Evolutionary.class);
 		EvoDaemon.evoqueue.add(hitter);
-		canRun = true;
-		System.out.println("--> [INFO      ] Scheduled an Deterministic Evolutionary Strategy");
-		
-		//scheduleFirstInvocation(invocationIntervalSecs);
+		System.out.println("---> [SCHEDULE  ] Scheduled a Fitness Based Evolutionary Strategy");
 	}
 	
 	public static void scheduleNextInvocation(long intervalinSecs) {
@@ -174,12 +159,11 @@ public class Deterministic implements Callable<Boolean>, ClassFileTransformer {
 
 	public Boolean call() {
 		try {
-			System.out.println("--> [EVOLUTION ] Deterministic Evolutionary Strategy Running");
-			//this.INSTRUMENTATION.addTransformer(this, true);
+			System.out.println("--> [EVOLUTION ] Fitness Based Evolutionary Strategy Running");
+			this.INSTRUMENTATION.addTransformer(this, true);
 			EvoDaemon.retransformClasses();
-			//this.INSTRUMENTATION.removeTransformer(this);
-			//AgentData.redefineClass(this.INSTRUMENTATION);
-			canRun = false;
+			this.INSTRUMENTATION.removeTransformer(this);
+			AgentData.redefineClass(this.INSTRUMENTATION);
 			return true;
 		} catch (Exception e) {
 			e.printStackTrace();
@@ -203,7 +187,7 @@ public class Deterministic implements Callable<Boolean>, ClassFileTransformer {
 		@Override
         public void visitMethodInsn(int opcode, String owner, String name, String desc, boolean itf) {
             System.out.println("Name: " + name + " Owner: " + owner + " desc: " + desc + " Opcode:" + opcode + " Interface: " + itf);
-            if (!Deterministic.canBeRemoved(this.methodClass, name, desc)) {
+            if (!Evolutionary.canBeRemoved(this.methodClass, name, desc)) {
             	super.visitMethodInsn(opcode, owner, name, desc, itf);
             } else {
             	System.out.println("Removing call to methodA");

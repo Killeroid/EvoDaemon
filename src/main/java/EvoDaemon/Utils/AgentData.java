@@ -37,7 +37,7 @@ public class AgentData {
 			put("java.lang.Object", 0);
 			put("AgentJ", 0);
 			//put("Test.", 0);
-			//put("java.", 0);
+			put("java.", 0);
 			put("java.io", 0);
 			put("sun.instrument", 0);
 			put("java.lang.instrument", 0);
@@ -49,7 +49,8 @@ public class AgentData {
 			put("EvoAgent.", 0);
 			put("java.util.concurrent", 0);
 			put("Test.SlimTest.", 0);
-			
+			put("SlimCollection.", 0);
+			put("java.util.Random", 0);
 	}};
 	
 	//public static ConcurrentHashMap<String, AtomicLong> visitCounts = new ConcurrentHashMap<String, AtomicLong>(); //store number of visits
