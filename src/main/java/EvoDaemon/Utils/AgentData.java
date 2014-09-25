@@ -10,7 +10,6 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Pattern;
 
 import EvoDaemon.EvoDaemon;
-import EvoDaemon.Transformers.HitCounter;
 
 
 public class AgentData {
@@ -53,7 +52,6 @@ public class AgentData {
 			put("java.util.Random", 0);
 	}};
 	
-	//public static ConcurrentHashMap<String, AtomicLong> visitCounts = new ConcurrentHashMap<String, AtomicLong>(); //store number of visits
 	
 	public static ConcurrentHashMap<String, HashMap<String, AtomicLong>> visitStats = new ConcurrentHashMap<String, HashMap<String, AtomicLong>>();
 	
@@ -69,7 +67,6 @@ public class AgentData {
 		put("maxFitness", new AtomicLong(0));
 	}};
 	
-	public static long CollectionFreq = 60000;
 	
 	
 	public static Set<String> getDoNotInstrument() {
@@ -141,47 +138,6 @@ public class AgentData {
 	}
 	
 	
-	/*
-	 * Record when method is called
-	 * 
-	 * VisitFreq = old_freq + ((new_freq - old_freq) / currentHits)
-	 * old_freq = (new_hit_Time - last_hit_time)
-	 */
-	public static void hit(String methodName, String desc, String methodOwner, long hitTime) {
-		String normalizedOwner = methodOwner.replaceAll(Pattern.quote("."), "/");
-		String normalizedDesc = (desc == null) ? "" : desc;
-		String methodFullName = normalizedOwner + "." + methodName + " >> " + normalizedDesc;
-		String methodCaller = HitCounter.getMethodCaller();
-		
-		if (AgentData.visitStats.containsKey(methodFullName)) {
-			//Count visits
-
-			
-			//long hitTime = System.nanoTime();
-			long count = AgentData.visitStats.get(methodFullName).get("visitCount").incrementAndGet();
-			long lastVisit = AgentData.visitStats.get(methodFullName).get("lastVisit").getAndSet(hitTime);
-			
-			if (count <= 2) {
-				AgentData.visitStats.get(methodFullName).get("visitFreq").set(hitTime - lastVisit);
-			} else {
-				long lastVisitFreq = AgentData.visitStats.get(methodFullName).get("visitFreq").get();
-				//long newVisitFreq = ((hitTime - lastVisit) + ((count - 2) * lastVisitFreq)) / (count - 1) ;
-				AgentData.visitStats.get(methodFullName).get("visitFreq").set(((hitTime - lastVisit) + ((count - 2) * lastVisitFreq)) / (count - 1));
-			}
-			
-			
-			//Count number of times invokee
-			AgentData.methodInvokeeCount.putIfAbsent(methodCaller, new AtomicLong(0));
-			AgentData.methodInvokeeCount.get(methodCaller).incrementAndGet();
-			
-			
-			System.out.print(" Method: " + normalizedOwner + "." + methodName + "() | Visit: " + AgentData.visitStats.get(methodFullName).get("visitCount")
-					 + " visitFreq: " + AgentData.visitStats.get(methodFullName).get("visitFreq").get());
-			System.out.print(" | ");
-			System.out.print("Invoked by " + methodCaller + "\n");
-		}
-	}
-	
 	public static void initRecord(String methodName, String desc, String methodOwner) {
 		String normalizedOwner = methodOwner.replaceAll(Pattern.quote("."), "/");
 		String normalizedDesc = (desc == null) ? "" : desc;
@@ -198,11 +154,6 @@ public class AgentData {
 		}});
 	}
 	
-	
-	public static double cummAvg() {
-		
-		return 0;
-	}
 	
 	public static HashMap<String, AtomicLong> getMethodDetails(String methodName, String desc, String methodOwner) {
 		String normalizedOwner = methodOwner.replaceAll(Pattern.quote("."), "/");

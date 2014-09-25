@@ -16,13 +16,13 @@ import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.regex.Pattern;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.apache.commons.io.IOUtils;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassWriter;
 
-import EvoDaemon.Strategies.Deterministic;
+import EvoDaemon.Strategies.*;
 import EvoDaemon.Transformers.*;
 import EvoDaemon.Utils.*;
 import EvoDaemon.Runners.*;
@@ -40,7 +40,7 @@ public class EvoDaemon implements Runnable {
 	public static long currEpoch;
 	public static long epochLengthSecs = 30L;
 	private boolean shutDownNow = false;
-	//public static volatile Instrumentation INSTRUMENTATION;
+	//public static Instrumentation INSTRUMENTATION;
 	private static volatile Class<?> AgentClass;
 
 	public EvoDaemon() {
@@ -53,7 +53,6 @@ public class EvoDaemon implements Runnable {
 		jarFile.deleteOnExit();
 		currEpoch = 0L;
 		evoqueue = new ConcurrentLinkedQueue<HashMap<String, Object>>();
-		//queue = new ConcurrentLinkedQueue<Class<? extends Callable<?>>>();
 		runningTask = null;
 	}
 
@@ -78,6 +77,10 @@ public class EvoDaemon implements Runnable {
 		}
 	}
 	
+	
+	/*
+	 * Get agent class loaded in JVM
+	 */
 	public static Class<?> getAgentClass() {
 		try 
 		{
@@ -89,6 +92,9 @@ public class EvoDaemon implements Runnable {
 		return null;
 	}
 
+	/*
+	 * Get instrumentation interface form agent loaded in JVM
+	 */
 	public static Instrumentation getInstrumentation() {
 		try 
 		{	
@@ -109,12 +115,20 @@ public class EvoDaemon implements Runnable {
 	}
 
 
+	/*
+	 * Print out all loaded classes
+	 */
 	public static void getAllLoadedClasses(Instrumentation instr) {
 		for (Class<?> c : instr.getAllLoadedClasses()) {
 			System.out.printf("%-55s %-55s %-45s\n", c.getName(), c.getCanonicalName(), c.getClassLoader());
 		}
 	}
 
+	/*
+	 * Run daemon thread
+	 * (non-Javadoc)
+	 * @see java.lang.Runnable#run()
+	 */
 	@SuppressWarnings("unchecked")
 	public void run() {
 		System.out.println("--> [INFO      ] Starting daemon thread");
@@ -123,18 +137,16 @@ public class EvoDaemon implements Runnable {
 			System.out.println("--> [ERROR     ] Unable to find instrumentation interface");
 			return;
 		}
-		currEpoch = 0L;
+		currEpoch = 0L;   //Start the epoch counting
 		long startofEpoch = System.currentTimeMillis();
 		Thread.currentThread().setUncaughtExceptionHandler(new DefaultExceptionHandler());
 
-
-		//ClassRedefinition redefs = new ClassRedefinition(new HitCounter());
-		//INSTRUMENTATION.addTransformer(redefs, true);
+		
 		OnLoad firstpass = new OnLoad(new HitCounter());
 		getInstrumentation().addTransformer(firstpass, true);
 		//getInstrumentation().addTransformer(new Deterministic(), true);
 
-		AgentTransformer.schedule();
+		RetransformerRunner.schedule();
 
 		HitCounterRunner hitter = new HitCounterRunner();
 		for (;;) {
@@ -157,18 +169,12 @@ public class EvoDaemon implements Runnable {
 
 			if (runningTask != null && !runningTask.isDone()) {
 				//System.out.println("[NOTICE] A task is running");
-				//System.out.print(".");
 				continue;
 			} else {
 				runningTask = null;
-				//Deterministic.scheduleNextInvocation(60L);
-
 			}
 
 			try {
-
-				//System.out.println("[NOTICE] Querying for new action");
-				//HashMap action = null;
 
 				HashMap<String, Object> action = evoqueue.poll();
 				if (action != null) {
@@ -180,9 +186,6 @@ public class EvoDaemon implements Runnable {
 						runningTask = executor.submit(hitter); 
 						break;
 					case 2: //EvoAction : 
-						//runningTask = executor.submit(queue.poll().newInstance()); 
-						//runningTask = executor.submit(new AgentTransformer(INSTRUMENTATION));
-
 						runningTask = executor.submit(((Class<? extends Callable<?>>) action.get("actionClass")).getDeclaredConstructor().newInstance());
 						if (action.get("actionClass") == Deterministic.class) {
 							EvoDaemon.getInstrumentation().removeTransformer(new Deterministic());
@@ -191,11 +194,6 @@ public class EvoDaemon implements Runnable {
 						break;
 					}
 				}
-
-
-
-
-
 
 			} catch (RejectedExecutionException e) {
 				System.out.println("--> [ERROR     ] Task was rejected");	
@@ -265,6 +263,9 @@ public class EvoDaemon implements Runnable {
 		return null;
 	}
 
+	/*
+	 * Check if class can be instrumented
+	 */
 	public static boolean canInstrument(Class<?> c) {
 		if (getInstrumentation().isModifiableClass(c) && c.getClassLoader() != null) {
 			//if (INSTRUMENTATION.isModifiableClass(c)) {
@@ -274,10 +275,16 @@ public class EvoDaemon implements Runnable {
 		}
 	}
 
+	/*
+	 * Check if class thats dervied from the classnam ecan be instrumented
+	 */
 	public static boolean canInstrument(String className) {
 		return AgentData.canInstrument(className);
 	}
 
+	/*
+	 * Get bytecode from a class
+	 */
 	public static byte[] getByteCode(Class<?> c) 
 			throws IOException {
 		byte[] bytecode = null;
@@ -293,6 +300,9 @@ public class EvoDaemon implements Runnable {
 		return bytecode;
 	}
 
+	/*
+	 * Retransform all loaded classes
+	 */
 	public static void retransformClasses() {
 		System.out.println("--> [INFO      ] Transforming classes");
 		//System.out.printf("%-55s %-55s %-45s\n", "NAME", "CANONICAL NAME", "CLASSLOADER");
@@ -327,47 +337,20 @@ public class EvoDaemon implements Runnable {
 	}
 
 	public void printVisitCounts() {
-		for (Entry<String, AtomicInteger> entry : VisitCounter.getVisits().entrySet()) {
+		for (Entry<String, HashMap<String, AtomicLong>> entry : AgentData.visitStats.entrySet()) {
 			String methodFullNameDesc = entry.getKey();
 			String methodName = methodFullNameDesc.substring(0, methodFullNameDesc.lastIndexOf(" >> ")) ;
 
 			System.out.printf("%-70s %-10d\n", "NAME", "VISITS");
 			//normalizedOwner + "." + methodName + " >> " + normalizedDesc;
-			System.out.printf("%-70s %-10d\n", methodName, entry.getValue().intValue());
+			System.out.printf("%-70s %-10d\n", methodName, entry.getValue().get("visitCount").intValue());
 		}
 
 	}
 
-	public void countVisit(String methodName, String desc, String methodOwner, long hitTime) {
-		String normalizedOwner = methodOwner.replaceAll(Pattern.quote("."), "/");
-		String normalizedDesc = (desc == null) ? "" : desc;
-		String methodFullName = normalizedOwner + "." + methodName + " >> " + normalizedDesc;
-		//String methodCaller = getMethodCaller();
-
-		AgentData.initRecord(methodFullName);
-
-
-		//Count visits
-		long count = AgentData.visitStats.get(methodFullName).get("visitCount").incrementAndGet();
-		long lastVisit = AgentData.visitStats.get(methodFullName).get("lastVisit").getAndSet(hitTime);
-
-		if (count <= 2) {
-			AgentData.visitStats.get(methodFullName).get("visitFreq").set(hitTime - lastVisit);
-		} else {
-			long lastVisitFreq = AgentData.visitStats.get(methodFullName).get("visitFreq").get();
-			//long newVisitFreq = ((hitTime - lastVisit) + ((count - 2) * lastVisitFreq)) / (count - 1) ;
-			AgentData.visitStats.get(methodFullName).get("visitFreq").set(((hitTime - lastVisit) + ((count - 2) * lastVisitFreq)) / (count - 1));
-		}
-
-
-		//Count number of times invokee
-		//AgentData.methodInvokeeCount.putIfAbsent(methodCaller, new AtomicLong(0));
-		//AgentData.methodInvokeeCount.get(methodCaller).incrementAndGet();
-
-
-
-	}
-
+	/*
+	 * Record a visit to a number
+	 */
 	public static void hit(String methodName, String desc, String methodOwner) {
 		long hitTime = System.nanoTime();
 		HashMap<String, Object> hitter = new HashMap<String, Object>();
@@ -382,128 +365,7 @@ public class EvoDaemon implements Runnable {
 
 
 
-	class HitCounterRunner implements Runnable {
-		private String className;
-		private String methodName;
-		private String methodDesc;
-		private long hitTime;
-		private boolean canRun = false;
-
-
-
-		HitCounterRunner() {
-			reset();
-		}
-
-
-		HitCounterRunner(String methodName, String desc, String methodOwner, long hitTime) {
-			this.className = methodOwner;
-			this.methodName = methodName;
-			this.methodDesc = desc;
-			this.hitTime = hitTime;
-			this.canRun = true;
-		}
-
-		public void reset() {
-			this.className = null;
-			this.methodName = null;
-			this.methodDesc = null;
-			this.hitTime = 0;
-			this.canRun = false;
-		}
-
-		public void newHit(String methodName, String desc, String methodOwner, long hitTime) {
-			this.className = methodOwner;
-			this.methodName = methodName;
-			this.methodDesc = desc;
-			this.hitTime = hitTime;
-			this.canRun = true;
-		}
-
-		public void run() {
-			if (this.canRun) {
-				String normalizedOwner = this.className.replaceAll(Pattern.quote("."), "/");
-				String normalizedDesc = (this.methodDesc == null) ? "" : this.methodDesc;
-				String methodFullName = normalizedOwner + "." + methodName + " >> " + normalizedDesc;
-
-				//Set default values
-				AgentData.initRecord(methodFullName);
-
-
-				//Count visits
-				long count = AgentData.visitStats.get(methodFullName).get("visitCount").incrementAndGet();
-				long lastVisit = AgentData.visitStats.get(methodFullName).get("lastVisit").getAndSet(this.hitTime);
-
-				if (count <= 2) {
-					AgentData.visitStats.get(methodFullName).get("visitFreq").set(this.hitTime - lastVisit);
-				} else {
-					long lastVisitFreq = AgentData.visitStats.get(methodFullName).get("visitFreq").get();
-					//long newVisitFreq = ((hitTime - lastVisit) + ((count - 2) * lastVisitFreq)) / (count - 1) ;
-					AgentData.visitStats.get(methodFullName).get("visitFreq").set(((this.hitTime - lastVisit) + ((count - 2) * lastVisitFreq)) / (count - 1));
-				}
-
-
-				/*
-				 * Update max's
-				 */
-				if (AgentData.countMaxs.get("maxVisit").longValue() < count) 
-					AgentData.countMaxs.get("maxVisit").getAndSet(count);
-
-				long visitFreq = AgentData.visitStats.get(methodFullName).get("visitFreq").longValue();
-
-				if (AgentData.countMaxs.get("maxFreq").longValue() < visitFreq) 
-					AgentData.countMaxs.get("maxFreq").getAndSet(visitFreq);
-
-				//System.out.print(" Method: " + normalizedOwner + "." + methodName + "() | Visit: " + count);
-				reset();
-
-			}
-
-		}
-	}
-
-
-
-	static class CounterInserter implements Runnable {
-
-		public void run() {
-			for (Class<?> c : EvoDaemon.getInstrumentation().getAllLoadedClasses()) {
-				if (EvoDaemon.canInstrument(c)) {
-					try {
-						System.out.printf("%-55s %-55s %-45s\n", c.getName(), c.getCanonicalName(), c.getClassLoader());
-						EvoDaemon.getInstrumentation().retransformClasses(new Class<?>[] { c });
-					} catch (Exception e) {
-						e.printStackTrace();
-						//System.exit(1);
-					}
-				} 
-			}
-			try {
-				//redefs.redefineClasses(Agent.INSTRUMENTATION);
-			} catch (Exception e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-			} 
-		}	
-	}
-
-	static class HitFrequencyCounter implements Runnable {
-		private int period;
-
-		public HitFrequencyCounter(int periodInSecs) {
-			this.period = periodInSecs;
-		}
-
-		public HitFrequencyCounter() {
-			this.period = 60;
-		}
-
-		public void run() {
-			long startTime = System.nanoTime();
-
-		}
-
-	}
+	
 
 	static enum actionType {
 		HitCounter(1), EvoAction(2);
