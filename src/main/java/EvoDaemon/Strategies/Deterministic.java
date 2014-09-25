@@ -175,7 +175,7 @@ public class Deterministic implements Callable<Boolean>, ClassFileTransformer {
 	public Boolean call() {
 		try {
 			System.out.println("--> [EVOLUTION ] Deterministic Evolutionary Strategy Running");
-			EvoDaemon.INSTRUMENTATION.addTransformer(this, true);
+			//EvoDaemon.getInstrumentation().addTransformer(this, true);
 			EvoDaemon.retransformClasses();
 			//EvoDaemon.INSTRUMENTATION.removeTransformer(this);
 			removeTransformer();
@@ -184,7 +184,7 @@ public class Deterministic implements Callable<Boolean>, ClassFileTransformer {
 			return true;
 		} catch (Exception e) {
 			e.printStackTrace();
-			EvoDaemon.INSTRUMENTATION.removeTransformer(this);
+			EvoDaemon.getInstrumentation().removeTransformer(this);
 			return false;
 		}
 		
@@ -193,9 +193,9 @@ public class Deterministic implements Callable<Boolean>, ClassFileTransformer {
 	public void removeTransformer() {
 		boolean notDone = true;
 		do {
-			notDone = EvoDaemon.INSTRUMENTATION.removeTransformer(this);
+			notDone = EvoDaemon.getInstrumentation().removeTransformer(new Deterministic());
 			System.out.println("--> [NOTICE    ] Removing Deterministic from instrumentation");
-		} while (notDone == false);
+		} while (notDone != false);
 		
 	}
 	

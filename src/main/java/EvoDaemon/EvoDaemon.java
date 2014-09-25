@@ -40,18 +40,18 @@ public class EvoDaemon implements Runnable {
 	public static long currEpoch;
 	public static long epochLengthSecs = 30L;
 	private boolean shutDownNow = false;
-	public static volatile Instrumentation INSTRUMENTATION;
+	//public static volatile Instrumentation INSTRUMENTATION;
+	private static volatile Class<?> AgentClass;
 
 	public EvoDaemon() {
 		System.out.println("[INFO] Initializing daemon thread...");
 		currEpoch = 0L;
 	}
 
-	public EvoDaemon(Instrumentation instr, String jar) {
+	public EvoDaemon(String jar) {
 		File jarFile = new File(jar);
 		jarFile.deleteOnExit();
 		currEpoch = 0L;
-		INSTRUMENTATION = instr;
 		evoqueue = new ConcurrentLinkedQueue<HashMap<String, Object>>();
 		//queue = new ConcurrentLinkedQueue<Class<? extends Callable<?>>>();
 		runningTask = null;
@@ -61,10 +61,10 @@ public class EvoDaemon implements Runnable {
 
 	}
 
-	public static void startDaemon(Instrumentation instr, String jar) {
+	public static void startDaemon(String jar) {
 		System.out.println("--> [INFO      ] Starting daemon thread");
 		try {
-			Thread daemon = new Thread(new EvoDaemon(instr, jar));
+			Thread daemon = new Thread(new EvoDaemon(jar));
 			daemon.setName("EvoDaemon");
 			daemon.setUncaughtExceptionHandler(new DefaultExceptionHandler());
 			daemon.start();
@@ -77,18 +77,25 @@ public class EvoDaemon implements Runnable {
 			e.printStackTrace();
 		}
 	}
+	
+	public static Class<?> getAgentClass() {
+		try 
+		{
+			Class<?> clazz = Thread.currentThread().getContextClassLoader().loadClass("EvoAgent.Agent");
+			return clazz;			
+		} catch (ClassNotFoundException e) {
+			System.out.println("--> [NOTICE    ] Could not load Agent");
+		}
+		return null;
+	}
 
 	public static Instrumentation getInstrumentation() {
 		try 
-		{
-			Class<?> AgentClass = Thread.currentThread().getContextClassLoader().loadClass("EvoAgent.Agent");
+		{	
 			Field AgentInstrumentationField = AgentClass.getDeclaredField("INSTRUMENTATION");
-			Instrumentation AgentInstrumentation = (Instrumentation) AgentInstrumentationField.get(null);
-			getAllLoadedClasses(AgentInstrumentation);
+			//getAllLoadedClasses(AgentInstrumentation);
 			
-			return AgentInstrumentation;			
-		} catch (ClassNotFoundException e) {
-			System.out.println("--> [NOTICE    ] Could not load Agent");
+			return (Instrumentation) AgentInstrumentationField.get(null);			
 		} catch (NoSuchFieldException e) {
 			System.out.println("--> [NOTICE    ] Could not find Agent Instrumentation");
 		} catch (SecurityException e) {
@@ -111,7 +118,11 @@ public class EvoDaemon implements Runnable {
 	@SuppressWarnings("unchecked")
 	public void run() {
 		System.out.println("--> [INFO      ] Starting daemon thread");
-		getInstrumentation();
+		AgentClass = getAgentClass();
+		if (getInstrumentation() == null) {
+			System.out.println("--> [ERROR     ] Unable to find instrumentation interface");
+			return;
+		}
 		currEpoch = 0L;
 		long startofEpoch = System.currentTimeMillis();
 		Thread.currentThread().setUncaughtExceptionHandler(new DefaultExceptionHandler());
@@ -120,8 +131,8 @@ public class EvoDaemon implements Runnable {
 		//ClassRedefinition redefs = new ClassRedefinition(new HitCounter());
 		//INSTRUMENTATION.addTransformer(redefs, true);
 		OnLoad firstpass = new OnLoad(new HitCounter());
-		INSTRUMENTATION.addTransformer(firstpass, true);
-		INSTRUMENTATION.addTransformer(new Deterministic(), true);
+		getInstrumentation().addTransformer(firstpass, true);
+		//getInstrumentation().addTransformer(new Deterministic(), true);
 
 		AgentTransformer.schedule();
 
@@ -171,7 +182,12 @@ public class EvoDaemon implements Runnable {
 					case 2: //EvoAction : 
 						//runningTask = executor.submit(queue.poll().newInstance()); 
 						//runningTask = executor.submit(new AgentTransformer(INSTRUMENTATION));
+
 						runningTask = executor.submit(((Class<? extends Callable<?>>) action.get("actionClass")).getDeclaredConstructor().newInstance());
+						if (action.get("actionClass") == Deterministic.class) {
+							EvoDaemon.getInstrumentation().removeTransformer(new Deterministic());
+							System.out.println("--> [NOTICE    ] Removing Deterministic from instrumentation");
+						}
 						break;
 					}
 				}
@@ -250,7 +266,7 @@ public class EvoDaemon implements Runnable {
 	}
 
 	public static boolean canInstrument(Class<?> c) {
-		if (INSTRUMENTATION.isModifiableClass(c) && c.getClassLoader() != null) {
+		if (getInstrumentation().isModifiableClass(c) && c.getClassLoader() != null) {
 			//if (INSTRUMENTATION.isModifiableClass(c)) {
 			return AgentData.canInstrument(c.getName());	
 		} else {
@@ -280,11 +296,11 @@ public class EvoDaemon implements Runnable {
 	public static void retransformClasses() {
 		System.out.println("--> [INFO      ] Transforming classes");
 		//System.out.printf("%-55s %-55s %-45s\n", "NAME", "CANONICAL NAME", "CLASSLOADER");
-		for (Class<?> c : INSTRUMENTATION.getAllLoadedClasses()) {
+		for (Class<?> c : getInstrumentation().getAllLoadedClasses()) {
 			if (canInstrument(c)) {
 				try {
 					System.out.println("--> [INFO      ] Transforming " + c.getName() + "...");
-					INSTRUMENTATION.retransformClasses(new Class<?>[] { c });
+					getInstrumentation().retransformClasses(new Class<?>[] { c });
 				} catch (Exception e) {
 					e.printStackTrace();
 					//System.exit(1);
@@ -299,7 +315,7 @@ public class EvoDaemon implements Runnable {
 	 */
 	public static Class<?> getClass(String className) {
 		Class<?> result = null;
-		for (@SuppressWarnings("rawtypes") Class c : INSTRUMENTATION.getAllLoadedClasses()) {
+		for (@SuppressWarnings("rawtypes") Class c : getInstrumentation().getAllLoadedClasses()) {
 			//System.out.println("Trying to find class: " + className + " and this is: " + c.getName());
 			if (canInstrument(c) && className.replace("/", ".").equalsIgnoreCase(c.getName())) {
 				System.out.println("Trying to find class: " + className.replace("/", ".") + " and this is: " + c.getName());
@@ -451,11 +467,11 @@ public class EvoDaemon implements Runnable {
 	static class CounterInserter implements Runnable {
 
 		public void run() {
-			for (Class<?> c : EvoDaemon.INSTRUMENTATION.getAllLoadedClasses()) {
+			for (Class<?> c : EvoDaemon.getInstrumentation().getAllLoadedClasses()) {
 				if (EvoDaemon.canInstrument(c)) {
 					try {
 						System.out.printf("%-55s %-55s %-45s\n", c.getName(), c.getCanonicalName(), c.getClassLoader());
-						EvoDaemon.INSTRUMENTATION.retransformClasses(new Class<?>[] { c });
+						EvoDaemon.getInstrumentation().retransformClasses(new Class<?>[] { c });
 					} catch (Exception e) {
 						e.printStackTrace();
 						//System.exit(1);
